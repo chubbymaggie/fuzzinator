@@ -1,38 +1,44 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
 import json
 
-from .callable_decorator import CallableDecorator
+from . import CallableDecorator
 
 
 class AnonymizeDecorator(CallableDecorator):
     """
     Decorator for SUT calls to anonymize issue properties.
 
-    Mandatory parameter of the decorator:
-      - 'old_text': text to replace in issue properties.
-    Optional parameters of the decorator:
-      - 'new_text': text to replace 'old_text' with (empty string by default).
-      - 'properties': array of properties to anonymize (anonymize all properties
-        by default).
+    **Mandatory parameter of the decorator:**
 
-    Example configuration snippet:
-    [sut.foo]
-    call=fuzzinator.call.StdinSubprocessCall
-    call.decorate(0)=fuzzinator.call.AnonymizeDecorator
+      - ``old_text``: text to replace in issue properties.
 
-    [sut.foo.call]
-    command=/home/alice/foo/bin/foo -
+    **Optional parameters of the decorator:**
 
-    [sut.foo.call.decorate(0)]
-    old_text=/home/alice/foo
-    new_text=FOO_ROOT
-    properties=["stdout", "stderr"]
+      - ``new_text``: text to replace 'old_text' with (empty string by default).
+      - ``properties``: array of properties to anonymize (anonymize all
+        properties by default).
+
+    **Example configuration snippet:**
+
+        .. code-block:: ini
+
+            [sut.foo]
+            call=fuzzinator.call.StdinSubprocessCall
+            call.decorate(0)=fuzzinator.call.AnonymizeDecorator
+
+            [sut.foo.call]
+            command=/home/alice/foo/bin/foo -
+
+            [sut.foo.call.decorate(0)]
+            old_text=/home/alice/foo
+            new_text=FOO_ROOT
+            properties=["stdout", "stderr"]
     """
 
     def decorator(self, old_text, new_text=None, properties=None, **kwargs):
@@ -48,7 +54,7 @@ class AnonymizeDecorator(CallableDecorator):
                     ks = list(issue.keys())
 
                 for key in ks:
-                    issue[key] = issue[key].replace(bytes(old_text, 'utf-8'), bytes(new_text or '', 'utf-8'))
+                    issue[key] = issue.get(key, b'').replace(bytes(old_text, 'utf-8'), bytes(new_text or '', 'utf-8'))
 
                 return issue
 

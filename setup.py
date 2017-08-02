@@ -1,3 +1,10 @@
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
+#
+# Licensed under the BSD 3-Clause License
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
+# This file may not be copied, modified, or distributed except
+# according to those terms.
+
 from os.path import dirname, join
 from setuptools import setup, find_packages
 
@@ -13,12 +20,13 @@ setup(
     author='Renata Hodovan, Akos Kiss',
     author_email='hodovan@inf.u-szeged.hu, akiss@inf.u-szeged.hu',
     description='Fuzzinator Random Testing Framework',
-    long_description=open('README.md').read(),
+    long_description=open('README.rst').read(),
     zip_safe=False,
     include_package_data=True,
-    install_requires=['chardet', 'picire', 'pexpect', 'psutil',
-                      'PyGithub', 'pymongo', 'pyperclip', 'python-bugzilla',
-                      'rainbow_logging_handler', 'tornado', 'urwid'],
+    install_requires=['chardet', 'keyring', 'pexpect', 'picire==17.1', 'picireny==17.1', 'psutil',
+                      'PyGithub', 'pymongo', 'pyperclip', 'python-bugzilla', 'google-api-python-client',
+                      'rainbow_logging_handler', 'sphinx', 'sphinx_rtd_theme',
+                      'tornado', 'urwid', 'yagmail'],
     entry_points={
         'console_scripts': ['fuzzinator = fuzzinator.executor:execute']
     }

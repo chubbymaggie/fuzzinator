@@ -1,35 +1,40 @@
 # Copyright (c) 2016 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
 import json
 
-from .callable_decorator import CallableDecorator
+from . import CallableDecorator
 
 
 class ExitCodeFilter(CallableDecorator):
     """
-    Decorator filter for SUT calls that return issues with 'exit_code' property.
+    Decorator filter for SUT calls that return issues with ``'exit_code'``
+    property.
 
-    Mandatory parameter of the decorator:
-      - 'exit_codes': if issue['exit_code'] is not in the array of exit_codes,
-        the issue is filtered out.
+    **Mandatory parameter of the decorator:**
+
+      - ``exit_codes``: if ``issue['exit_code']`` is not in the array of
+        ``exit_codes``, the issue is filtered out.
 
     The issues that are not filtered out are not changed in any way.
 
-    Example configuration snippet:
-    [sut.foo]
-    call=fuzzinator.call.StdinSubprocessCall
-    call.decorate(0)=fuzzinator.call.ExitCodeFilter
+    **Example configuration snippet:**
 
-    [sut.foo.call]
-    command=/home/alice/foo/bin/foo -
+        .. code-block:: ini
 
-    [sut.foo.call.decorate(0)]
-    exit_codes=[139]
+            [sut.foo]
+            call=fuzzinator.call.StdinSubprocessCall
+            call.decorate(0)=fuzzinator.call.ExitCodeFilter
+
+            [sut.foo.call]
+            command=/home/alice/foo/bin/foo -
+
+            [sut.foo.call.decorate(0)]
+            exit_codes=[139]
     """
 
     def decorator(self, exit_codes, **kwargs):

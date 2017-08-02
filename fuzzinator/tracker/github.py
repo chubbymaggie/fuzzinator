@@ -1,11 +1,21 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
-from github import Github, BadCredentialsException
+try:
+    # FIXME: very nasty, but a recent PyGithub version began to depend on
+    # pycrypto transitively, which is a PITA on Windows (can easily fail with an
+    # ``ImportError: No module named 'winrandom'``) -- so, we just don't care
+    # for now if we cannot load the github module at all. This workaround just
+    # postpones the error to the point when ``GithubReport`` is actually used,
+    # so be warned, don't do that on Windows!
+    from github import Github, BadCredentialsException
+except ImportError:
+    pass
+
 from string import Template
 
 from .base import BaseTracker
@@ -14,28 +24,28 @@ from .base import BaseTracker
 class GithubReport(BaseTracker):
 
     def __init__(self, repository, template, title=None):
-        BaseTracker.__init__(self, template=title, title=title)
+        BaseTracker.__init__(self, template=template, title=title)
         self.repository = repository
-        self.template = template
-        self.ghapi = None
+        self.ghapi = Github().get_repo(self.repository)
+        self.gh = None
 
     @property
     def logged_in(self):
-        return self.ghapi is not None
-    
+        try:
+            self.gh.get_user().id
+            return True
+        except:
+            return False
+
     def login(self, username, pwd):
         try:
-            gh = Github(username, pwd)
+            self.gh = Github(username, pwd)
             # This expression has no effect but will throw an exception if the authentication failed.
-            gh.get_user().id
-            self.ghapi = gh.get_repo(self.repository)
+            self.gh.get_user().id
+            self.ghapi = self.gh.get_repo(self.repository)
             return True
         except BadCredentialsException:
             return False
-
-    def format_issue(self, issue):
-        with open(self.template, 'r') as f:
-            return Template(f.read()).substitute(self.decode_issue(issue))
 
     def find_issue(self, issue):
         options = []
@@ -46,14 +56,17 @@ class GithubReport(BaseTracker):
             idx += 1
             if not page:
                 break
-            for issue in page:
-                if all(word in issue.body for word in issue['id'].decode('utf-8', errors='ignore').split()):
-                    options.append(issue)
+            for entry in page:
+                ident = issue['id'].decode('utf-8', errors='ignore') if isinstance(issue['id'], bytes) else issue['id']
+                if all(word in entry.body for word in ident.split()):
+                    options.append(entry)
         return options
 
-    def report_issue(self, report_details, extension=None):
-        return self.ghapi.create_issue(title=report_details['title'],
-                                       body=report_details['body'])
+    def report_issue(self, title, body):
+        return self.ghapi.create_issue(title=title, body=body)
 
     def __call__(self, issue):
         pass
+
+    def issue_url(self, issue):
+        return issue.html_url

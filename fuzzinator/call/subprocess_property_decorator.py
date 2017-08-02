@@ -1,15 +1,17 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
 import json
 import os
+import shlex
 import subprocess
+import sys
 
-from .callable_decorator import CallableDecorator
+from . import CallableDecorator
 
 
 class SubprocessPropertyDecorator(CallableDecorator):
@@ -17,29 +19,35 @@ class SubprocessPropertyDecorator(CallableDecorator):
     Decorator for SUT calls to extend issues with an arbitrary property where
     the value is the output of a shell subprocess.
 
-    Mandatory parameters of the decorator:
-      - 'property': name of the property to extend the issue with.
-      - 'command': string to pass to the child shell as a command to run.
-    Optional parameters of the decorator:
-      - 'cwd': if not None, change working directory before GDB/command
+    **Mandatory parameters of the decorator:**
+
+      - ``property``: name of the property to extend the issue with.
+      - ``command``: string to pass to the child shell as a command to run.
+
+    **Optional parameters of the decorator:**
+
+      - ``cwd``: if not ``None``, change working directory before the command
         invocation.
-      - 'env': if not None, a dictionary of variable names-values to update the
-        environment with.
+      - ``env``: if not ``None``, a dictionary of variable names-values to
+        update the environment with.
 
-    Example configuration snippet:
-    [sut.foo]
-    call=fuzzinator.call.StdinSubprocessCall
-    call.decorate(0)=fuzzinator.call.SubprocessPropertyDecorator
+    **Example configuration snippet:**
 
-    [sut.foo.call]
-    command=./bin/foo -
-    cwd=/home/alice/foo
+        .. code-block:: ini
 
-    [sut.foo.call.decorate(0)]
-    property=version
-    command=git rev-parse --short HEAD
-    cwd=${sut.foo.call:cwd}
-    env={"GIT_FLUSH": "1"}
+            [sut.foo]
+            call=fuzzinator.call.StdinSubprocessCall
+            call.decorate(0)=fuzzinator.call.SubprocessPropertyDecorator
+
+            [sut.foo.call]
+            command=./bin/foo -
+            cwd=/home/alice/foo
+
+            [sut.foo.call.decorate(0)]
+            property=version
+            command=git rev-parse --short HEAD
+            cwd=${sut.foo.call:cwd}
+            env={"GIT_FLUSH": "1"}
     """
 
     def decorator(self, property, command, cwd=None, env=None, **kwargs):
@@ -49,8 +57,7 @@ class SubprocessPropertyDecorator(CallableDecorator):
                 if not issue:
                     return None
 
-                issue[property] = subprocess.check_output(command,
-                                                          shell=True,
+                issue[property] = subprocess.check_output(shlex.split(command, posix=sys.platform != 'win32'),
                                                           cwd=cwd or os.getcwd(),
                                                           env=dict(os.environ, **json.loads(env or '{}')))
                 return issue

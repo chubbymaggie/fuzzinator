@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -13,15 +13,23 @@ import os
 import select
 import shlex
 import subprocess
+import sys
+import time
 
 logger = logging.getLogger(__name__)
 
 
 class TestRunnerSubprocessCall(object):
+    """
+    .. note::
 
-    def __init__(self, command, cwd=None, env=None, end_texts=None, init_wait=None, **kwargs):
+       Not available on platforms without fcntl support (e.g., Windows).
+    """
+
+    def __init__(self, command, cwd=None, env=None, end_texts=None, init_wait=None, timeout_per_test=None, **kwargs):
         self.end_texts = json.loads(end_texts) if end_texts else []
         self.init_wait = eval(init_wait) if init_wait else False
+        self.timeout_per_test = int(timeout_per_test) if timeout_per_test else None
         self.cwd = cwd or os.getcwd()
         self.command = command
         self.env = dict(os.environ, **json.loads(env)) if env else None
@@ -32,10 +40,12 @@ class TestRunnerSubprocessCall(object):
         return self
 
     def __exit__(self, *exc):
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
         return None
 
     def __call__(self, test, **kwargs):
-        if not self.proc or self.proc.poll():
+        if not self.proc or self.proc.poll() is not None:
             self.start(self.init_wait)
 
         try:
@@ -47,11 +57,10 @@ class TestRunnerSubprocessCall(object):
             return None
 
     def start(self, init_wait=True):
-        self.proc = subprocess.Popen(shlex.split(self.command),
+        self.proc = subprocess.Popen(shlex.split(self.command, posix=sys.platform != 'win32'),
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE,
                                      stdin=subprocess.PIPE,
-                                     close_fds=True,
                                      cwd=self.cwd,
                                      env=self.env)
         if init_wait:
@@ -66,10 +75,17 @@ class TestRunnerSubprocessCall(object):
             fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
         end_loop = False
+        start_time = time.time()
         while not end_loop:
             try:
+                time_left = self.timeout_per_test - (time.time() - start_time) if self.timeout_per_test else 0.5
+                if time_left <= 0:
+                    # Avoid waiting for the current test in the next iteration.
+                    self.proc.kill()
+                    break
+
                 try:
-                    read_fds = select.select(select_fds, [], select_fds, 0.5)[0]
+                    read_fds = select.select(select_fds, [], select_fds, time_left)[0]
                 except select.error as e:
                     if e.args[0] == errno.EINVAL:
                         continue
@@ -94,7 +110,7 @@ class TestRunnerSubprocessCall(object):
                 if self.proc.poll() is not None:
                     break
             except IOError as e:
-                logger.warn('[filter_streams] %s' % str(e))
+                logger.warning('[filter_streams] %s' % str(e))
 
         return {
             'exit_code': self.proc.returncode,

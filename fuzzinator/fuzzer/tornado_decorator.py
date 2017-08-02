@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -23,27 +23,31 @@ class TornadoDecorator(object):
     a http url as test input. The SUT is expected to access the returned url and
     the decorated fuzzer is invoked on every GET access to that url. The
     response to the GET contains the generated test input prepended by a html
-    meta tag to force continuous reloads in the SUT (or a 'window.close()'
+    meta tag to force continuous reloads in the SUT (or a ``window.close()``
     javascript content to force stopping the SUT if the decorated fuzzer cannot
     generate more tests). Useful for transporting fuzz tests to browser SUTs.
 
-    Mandatory parameter of the fuzzer decorator:
-      - 'port': first port to start binding the started http server to (keeps
+    **Mandatory parameter of the fuzzer decorator:**
+
+      - ``port``: first port to start binding the started http server to (keeps
         incrementing until a free port is found).
 
-    Example configuration snippet:
-    [sut.foo]
-    # assuming that foo expects a http url as input, which it tries to access
-    # afterwards
+    **Example configuration snippet:**
 
-    [fuzz.foo-with-bar-over-http]
-    sut=sut.foo
-    #fuzzer=...
-    fuzzer.decorate(0)=fuzzinator.fuzzer.TornadoDecorator
-    batch=5
+        .. code-block:: ini
 
-    [fuzz.foo-with-bar-over-http.fuzzer.decorate(0)]
-    port=8000
+            [sut.foo]
+            # assuming that foo expects a http url as input, which it tries to access
+            # afterwards
+
+            [fuzz.foo-with-bar-over-http]
+            sut=sut.foo
+            #fuzzer=...
+            fuzzer.decorate(0)=fuzzinator.fuzzer.TornadoDecorator
+            batch=5
+
+            [fuzz.foo-with-bar-over-http.fuzzer.decorate(0)]
+            port=8000
     """
 
     def __init__(self, port, **kwargs):
@@ -72,7 +76,7 @@ class TornadoDecorator(object):
             def __call__(self, **kwargs):
                 # Saving fuzzer args to make them available from the requesthandlers
                 # after passing a reference of ourselves.
-                if kwargs['index'] != 0 and not self.test:
+                if kwargs['index'] != 0 and self.test is None:
                     return None
 
                 self.fuzzer_kwargs = kwargs
@@ -127,7 +131,7 @@ class TornadoDecorator(object):
                     try:
                         self.wrapper.fuzzer_kwargs['index'] = self.wrapper.index
                         self.wrapper.test = self.fuzzer(**self.wrapper.fuzzer_kwargs)
-                        if self.wrapper.test:
+                        if self.wrapper.test is not None:
                             self.wrapper.index += 1
                             content = Template('<meta http-equiv="refresh" content="1;url=?&{% raw request %}">{% raw test %}'). \
                                 generate(request='index={index}'.format(index=self.wrapper.index), test=self.wrapper.test)

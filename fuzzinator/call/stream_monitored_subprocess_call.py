@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -14,15 +14,21 @@ import shlex
 import select
 import signal
 import subprocess
+import sys
 
 
 class StreamMonitoredSubprocessCall(object):
+    """
+    .. note::
+
+       Not available on platforms without fcntl support (e.g., Windows).
+    """
 
     def __init__(self, command, cwd=None, env=None, end_patterns=None, **kwargs):
         self.command = command
         self.cwd = cwd or os.getcwd()
         self.end_patterns = [re.compile(pattern.encode('utf-8', errors='ignore')) for pattern in json.loads(end_patterns)] if end_patterns else []
-        self.env = dict(os.environ, **json.loads(self.env)) if env else None
+        self.env = dict(os.environ, **json.loads(env)) if env else None
 
     def __enter__(self):
         return self
@@ -31,10 +37,9 @@ class StreamMonitoredSubprocessCall(object):
         return None
 
     def __call__(self, test, **kwargs):
-        self.proc = subprocess.Popen(shlex.split(self.command.format(test=test)),
+        self.proc = subprocess.Popen(shlex.split(self.command.format(test=test), posix=sys.platform != 'win32'),
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE,
-                                     close_fds=True,
                                      cwd=self.cwd or os.getcwd(),
                                      env=self.env)
         return self.wait_til_end()
@@ -82,6 +87,7 @@ class StreamMonitoredSubprocessCall(object):
 
         try:
             os.kill(self.proc.pid, signal.SIGKILL)
+            self.proc.wait()
         except:
             pass
 

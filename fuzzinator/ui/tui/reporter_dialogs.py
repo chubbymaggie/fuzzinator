@@ -1,47 +1,156 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
-import json
-import sys
-
+from os import get_terminal_size
 from urwid import *
+
 from .decor_widgets import PatternBox
 from .graphics import fz_box_pattern
+from .dialogs import Dialog, BugEditor
+from .button import FormattedButton
 
 
-class BugzillaReportDialog(WidgetWrap):
+class LoginDialog(Dialog):
     signals = ['close']
 
-    def __init__(self, issue, tracker):
+    def __init__(self, tracker):
+        self.tracker = tracker
+        name = Edit(caption='Username: ', edit_text='')
+        pwd = Edit(caption='Password: ', edit_text='', mask='*')
+        self.result = Text('')
+        super(LoginDialog, self).__init__(title='Login',
+                                          body=[self.result, name, pwd],
+                                          footer_btns=[FormattedButton(label='Login',
+                                                                       on_press=self.send_credentials,
+                                                                       user_data=(name, pwd)),
+                                                       FormattedButton(label='Cancel', on_press=lambda btn: self._emit('close'))])
+
+    def send_credentials(self, _, details):
+        result = self.tracker.login(details[0].edit_text, details[1].edit_text)
+        if not result:
+            self.result.set_text(('warning', 'Login failed!'))
+        else:
+            self._emit('close')
+
+
+class LoginButton(PopUpLauncher):
+    signals = ['click', 'ready']
+
+    def __init__(self, tracker):
+        self.tracker = tracker
+        super(LoginButton, self).__init__(FormattedButton('', style='dialog'))
+        connect_signal(self.original_widget, 'click', lambda btn: self.open_pop_up())
+
+    def create_pop_up(self):
+        pop_up = LoginDialog(self.tracker)
+        connect_signal(pop_up, 'close', lambda dialog: self.done())
+        return pop_up
+
+    def get_pop_up_parameters(self):
+        cols, rows = get_terminal_size()
+        return {'left': 0, 'top': -rows // 2 - 5, 'overlay_width': 50, 'overlay_height': 10}
+
+    def done(self):
+        self.close_pop_up()
+        self._emit('ready')
+
+
+class ReportDialog(PopUpTarget):
+    signals = ['close']
+
+    def __init__(self, issue, tracker, db, side_bar=None):
         self.issue = issue
         self.tracker = tracker
+        self.db = db
+        self.duplicate = None
 
-        # TODO: ugly! refactor needed!
-        from .widgets import FormattedButton
-        report_button = FormattedButton('Report', lambda button: self.report(btn=button))
-        save_button = FormattedButton('Save as reported', lambda button: self.tracker.set_reported(self.issue, self.duplicate))
-        close_button = FormattedButton('Close', lambda button: self._emit('close'))
+        self.edit_dups = BugEditor()
+        self.result = Text('')
+        self.issue_title = BugEditor(edit_text=self.tracker.title(issue))
+        self.issue_desc = BugEditor(edit_text=self.tracker.format_issue(issue), multiline=True, wrap='clip')
+        self.body = SimpleListWalker([Columns([('fixed', 13, Text(('dialog_secondary', 'Summary: '))),
+                                               ('weight', 10, self.issue_title)], dividechars=1),
+                                      Columns([('fixed', 13, Text(('dialog_secondary', 'Description: '))),
+                                               ('weight', 10, self.issue_desc)], dividechars=1)])
 
-        self.summary_box = Edit(caption='', edit_text=self.tracker.title(issue))
-        self.desc_box = Edit(caption='',
-                             edit_text=self.tracker.format_issue(issue),
-                             multiline=True,
-                             wrap='clip')
-        self.cc_box = Edit(caption='', edit_text='', multiline=True)
-        self.block_box = Edit(caption='', edit_text='')
-        self.extension = Edit(caption='', edit_text='html')
+        login_button = LoginButton(self.tracker)
+        connect_signal(login_button, 'ready', lambda btn: self.find_duplicates())
+        frame = Frame(body=AttrMap(Columns([('weight', 10, ListBox(self.body)),
+                                            ('weight', 3, AttrMap(ListBox(SimpleListWalker(side_bar or [])), attr_map='dialog_secondary'))]),
+                                   'dialog'),
+                      footer=Columns([('pack', FormattedButton('Close', lambda button: self._emit('close_reporter'))),
+                                      ('pack', FormattedButton('Report', lambda button: self.send_report())),
+                                      ('pack', FormattedButton('Save as reported', lambda button: self.save_reported())),
+                                      ('pack', login_button)], dividechars=2),
+                      focus_part='body')
 
-        products = []
-        self.product_info = self.tracker.bzapi.getproducts()
+        super(ReportDialog, self).__init__(AttrMap(PatternBox(frame, title=('dialog_title', issue['id']), **fz_box_pattern()), attr_map='dialog_border'))
+        if not self.tracker.logged_in:
+            login_button.keypress((0, 0), 'enter')
+        else:
+            self.find_duplicates()
+
+    def set_duplicate(self, btn, state):
+        if state:
+            self.duplicate = btn.label
+
+    def find_duplicates(self):
+        dups_walker = SimpleListWalker([self.edit_dups])
+        options = []
+        for entry in self.tracker.find_issue(self.issue):
+            radio_btn = RadioButton(options, self.tracker.issue_url(entry), on_state_change=self.set_duplicate)
+            # Select the first suggested bug if there is not set any.
+            if self.duplicate is None:
+                self.duplicate = radio_btn.label
+            dups_walker.append(radio_btn)
+        self.body.insert(0, Columns([('fixed', 13, Text(('dialog_secondary', 'Duplicates: '))),
+                                     ('weight', 10, BoxAdapter(ListBox(dups_walker), height=len(dups_walker)))]))
+
+    def get_report_data(self):
+        assert False, 'Should never be reached.'
+        return dict()
+
+    def send_report(self):
+        url = self.tracker.issue_url(self.tracker.report_issue(**self.get_report_data()))
+        self.result.set_text(('dialog_secondary', 'Reported at: {weburl}'.format(weburl=url)))
+        self.db.update_issue(self.issue, {'reported': url})
+        return url
+
+    def save_reported(self):
+        if self.edit_dups.text:
+            url = self.edit_dups.text
+        elif self.duplicate:
+            url = self.duplicate
+        else:
+            url = ''
+        self.db.update_issue(self.issue, {'reported': url})
+        self._emit('close')
+
+    def keypress(self, size, key):
+        if key in ['esc', 'f7']:
+            self._emit('close')
+        else:
+            super(ReportDialog, self).keypress(size, key)
+
+
+class BugzillaReportDialog(ReportDialog):
+
+    def __init__(self, issue, tracker, db):
+        self.edit_blocks = BugEditor()
+        self.edit_cc = BugEditor(multiline=True)
+        self.edit_extension = BugEditor(edit_text='html')
+
+        self.product_info = tracker.bzapi.getproducts()
         self.product = None
-        self.products_walker = SimpleListWalker([])
+        products_walker = SimpleListWalker([])
+        products = []
         for product in self.product_info:
             if product['is_active']:
-                self.products_walker.append(RadioButton(products, product['name'], on_state_change=self.set_product))
+                products_walker.append(RadioButton(products, product['name'], on_state_change=self.set_product))
 
         self.component = None
         self.component_box = SimpleFocusListWalker([])
@@ -49,44 +158,15 @@ class BugzillaReportDialog(WidgetWrap):
         self.version = None
         self.versions_box = SimpleFocusListWalker([])
 
-        self.result_box = Text(('report_status', ''))
+        side_bar = [LineBox(BoxAdapter(ListBox(products_walker), height=len(products_walker)), title='Products'),
+                    LineBox(BoxAdapter(ListBox(self.component_box), height=10), title='Components'),
+                    LineBox(BoxAdapter(ListBox(self.versions_box), height=10), title='Versions'),
+                    Columns([('weight', 1, Text('CC: ')), ('weight', 4, self.edit_cc)]),
+                    Columns([('weight', 1, Text('Blocks: ')), ('weight', 4, self.edit_blocks)]),
+                    Columns([('weight', 1, Text('Ext: ')), ('weight', 4, self.edit_extension)])]
 
-        self.body = SimpleListWalker([Columns([('fixed', 13, Text('Summary: ')), ('weight', 10, self.summary_box)], dividechars=1),
-                                      Columns([('fixed', 13, Text('Description: ')), ('weight', 10, self.desc_box)], dividechars=1)])
-
-        dups = self.tracker.find_issue(issue)
-        self.dups_walker = None
-        if dups:
-            options = []
-            self.dups_walker = SimpleListWalker([RadioButton(options, 'None')])
-            for entry in dups:
-                self.dups_walker.append(RadioButton(options, entry.weburl, on_state_change=self.set_duplicate))
-            self.body.insert(0, Columns([('fixed', 13, Text('Duplicates: ')), ('weight', 10, BoxAdapter(ListBox(self.dups_walker), height=len(self.dups_walker)))]))
-
-        frame = Frame(#header=AttrMap(Text(issue['id'], align='center'), attr_map='table_header_bg'),
-                      body=AttrMap(
-                          Columns([
-                              ('weight', 10, ListBox(self.body)),
-                              ('weight', 3, ListBox(SimpleListWalker([
-                                  LineBox(BoxAdapter(ListBox(self.products_walker), height=len(self.products_walker)), title='Products'),
-                                  LineBox(BoxAdapter(ListBox(self.component_box), height=10), title='Components'),
-                                  LineBox(BoxAdapter(ListBox(self.versions_box), height=10), title='Versions'),
-                                  Columns([('weight', 1, Text('CC: ')), ('weight', 4, self.cc_box)]),
-                                  Columns([('weight', 1, Text('Blocks: ')), ('weight', 4, self.block_box)]),
-                                  Columns([('weight', 1, Text('Ext: ')), ('weight', 4, self.extension)]),
-                              ])))])
-                      , 'table_header'),
-                      footer=Columns([('pack', close_button),
-                                      ('pack', report_button),
-                                      ('pack', save_button)], dividechars=2),
-                      focus_part='body')
-
-        WidgetWrap.__init__(self, AttrMap(PatternBox(frame, title=('dialog_title', issue['id']), **fz_box_pattern()), attr_map='main_bg'))
-        self.set_product(self.products_walker.contents[0], True)
-
-    def set_duplicate(self, btn, state):
-        if state:
-            self.duplicate = btn.label
+        super(BugzillaReportDialog, self).__init__(issue=issue, tracker=tracker, db=db, side_bar=side_bar)
+        self.set_product(products_walker.contents[0], True)
 
     def set_product(self, btn, state):
         if state:
@@ -115,78 +195,30 @@ class BugzillaReportDialog(WidgetWrap):
         for version in versions:
             self.versions_box.append(RadioButton(group=versions_group, label=version, on_state_change=self.set_version))
 
-    def keypress(self, size, key):
-        if key in ['esc', 'f3']:
-            self._emit('close')
-        else:
-            super(BugzillaReportDialog, self).keypress(size, key)
-
-    def report(self, btn):
-        report_details = dict(
-            product=self.product,
-            component=self.component,
-            summary=self.summary_box.edit_text,
-            version=self.version,
-            description=self.desc_box.edit_text,
-            blocks=self.block_box.edit_text
+    def get_report_data(self):
+        return dict(
+            report_details=dict(
+                product=self.product,
+                component=self.component,
+                summary=self.issue_title.edit_text,
+                version=self.version,
+                description=self.issue_desc.edit_text,
+                blocks=self.edit_blocks.edit_text
+            ),
+            test=self.issue['test'],
+            extension=self.edit_extension.edit_text
         )
-        bug = self.tracker.report_issue(report_details=report_details,
-                                        extension=self.extension.edit_text)
-
-        self.result_box.set_text('Reported at: {weburl}'.format(weburl=bug.weburl))
-        self.tracker.set_reported(self.issue, bug.weburl)
-        return bug
 
 
-class GithubReportDialog(WidgetWrap):
-    signals = ['close']
+class GithubReportDialog(ReportDialog):
 
-    def __init__(self, issue, tracker):
-        self.issue = issue
-        self.tracker = tracker
+    def get_report_data(self):
+        return dict(title=self.issue_title.edit_text,
+                    body=self.issue_desc.edit_text)
 
-        # TODO: ugly! refactor needed!
-        from .widgets import FormattedButton
-        report_button = FormattedButton('Report', lambda button: self.report(btn=button))
-        close_button = FormattedButton('Close', lambda button: self._emit('close'))
 
-        duplicate_box = None
-        dups = self.tracker.find_issue(issue)
-        if dups:
-            duplicate_box = LineBox(ListBox(SimpleListWalker([
-                        Text('* {summary}\n{url}'.format(summary=entry.title, url=entry.html_url)) for entry in dups])))
+class MonorailReportDialog(ReportDialog):
 
-        title_box = Edit(caption='', edit_text=self.tracker(issue))
-        body_box = Edit(caption='', edit_text=self.tracker.format_issue(issue), multiline=True)
-        self.result_box = Text(('report_status', ''))
-
-        self.body = SimpleListWalker([
-            Columns([('fixed', 10, Text('Title: ')), ('weight', 1, title_box)], dividechars=1),
-            Columns([('fixed', 10, Text('Description: ')), ('weight', 1, body_box)], dividechars=1)
-        ])
-
-        if duplicate_box:
-            self.body.insert(0, duplicate_box)
-
-        frame = Frame(header=AttrMap(Text(issue['id'], align='center'), attr_map='table_header_bg'),
-                      body=AttrMap(ListBox(self.body), 'table_header'),
-                      footer=Columns([('pack', close_button),
-                                      ('pack', report_button)], dividechars=2),
-                      focus_part='body')
-
-        WidgetWrap.__init__(self, AttrMap(LineBox(Padding(frame, left=1, right=1)), attr_map='main_bg'))
-
-    def keypress(self, size, key):
-        if key in ['esc', 'f3']:
-            self._emit('close')
-        else:
-            super(GithubReportDialog, self).keypress(size, key)
-
-    def report(self, btn):
-        bug = self.tracker.report_issue(dict(title=self.title_box.edit_text,
-                                             body=self.body_box.edit_text))
-
-        self.result_box.set_text('Reported at: {weburl}'.format(weburl=bug.html_url))
-        self.body.insert(0, self.result_box)
-        self.tracker.set_reported(self.issue, bug.html_url)
-        return bug
+    def get_report_data(self):
+        return dict(title=self.issue_title.edit_text,
+                    body=self.issue_desc.edit_text)

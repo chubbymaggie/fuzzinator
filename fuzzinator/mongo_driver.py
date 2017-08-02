@@ -1,7 +1,7 @@
 # Copyright (c) 2016 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -37,7 +37,7 @@ class MongoDriver(object):
     def add_issue(self, issue):
         result = self._db.fuzzinator_issues.update_one(
             {'id': issue['id'], 'sut': issue['sut']},
-            {'$set': issue},
+            {'$setOnInsert': issue},
             upsert=True
         )
         issue['_id'] = result.upserted_id
@@ -50,7 +50,8 @@ class MongoDriver(object):
         return self._db.fuzzinator_issues.find_one({'_id': id})
 
     def update_issue(self, issue, _set):
-        self._db.fuzzinator_issues.update_one({'id': issue['id'], 'sut': issue['sut']}, {'$set': _set})
+        sut = issue['sut'] if issue['sut'].startswith('sut.') else 'sut.' + issue['sut']
+        self._db.fuzzinator_issues.update_one({'id': issue['id'], 'sut': sut}, {'$set': _set})
 
     def remove_issue_by_id(self, _id):
         self._db.fuzzinator_issues.delete_one({'_id': _id})

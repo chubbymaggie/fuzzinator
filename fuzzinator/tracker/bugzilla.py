@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -15,9 +15,9 @@ from .base import BaseTracker
 
 class BugzillaReport(BaseTracker):
 
-    def __init__(self, url, template, title=None):
+    def __init__(self, product, url, template, title=None):
         BaseTracker.__init__(self, template=template, title=title)
-        self.template = template
+        self.product = product
         self.bzapi = Bugzilla(url)
 
     @property
@@ -31,17 +31,13 @@ class BugzillaReport(BaseTracker):
         except BugzillaError:
             return False
 
-    def format_issue(self, issue):
-        with open(self.template, 'r') as f:
-            return Template(f.read()).substitute(self.decode_issue(issue))
-
     def find_issue(self, issue):
-        return self.bzapi.query(self.bzapi.build_query(product='WebKit',
+        return self.bzapi.query(self.bzapi.build_query(product=self.product,
                                                        status=['NEW', 'REOPENED', 'ASSIGNED'],
                                                        short_desc=self.title(issue),
                                                        include_fields=['id', 'summary', 'weburl']))
 
-    def report_issue(self, report_details, extension):
+    def report_issue(self, report_details, test, extension):
         create_info = self.bzapi.build_createbug(product=report_details['product'],
                                                  component=report_details['component'],
                                                  summary=report_details['summary'],
@@ -52,10 +48,13 @@ class BugzillaReport(BaseTracker):
         bug = self.bzapi.createbug(create_info)
         test_file = 'test.{ext}'.format(ext=extension)
         with open(test_file, 'wb') as f:
-            f.write(report_details['test'])
+            f.write(test)
         self.bzapi.attachfile(idlist=bug.bug_id, attachfile=test_file, description='Test', is_patch=False)
         os.remove(test_file)
         return bug
 
     def __call__(self, issue):
         pass
+
+    def issue_url(self, issue):
+        return issue.weburl

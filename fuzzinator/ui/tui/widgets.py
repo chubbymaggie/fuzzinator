@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -14,12 +14,16 @@ from collections import OrderedDict
 from math import ceil
 from urwid import *
 
-from fuzzinator.tracker.base import init_tracker
 from fuzzinator.config import config_get_name_from_section
-from .dialogs import FormattedButton, ViewButton, EditButton, ReportButton, WarningDialog
-from .table import Table, TableColumn
+from fuzzinator.tracker.base import init_tracker
+from fuzzinator.validate_job import ValidateJob
+
 from .decor_widgets import PatternBox
+from .button import FormattedButton
+from .dialogs import WarningDialog, YesNoDialog
+from .popup_buttons import AboutButton, EditButton, ReportButton, ViewButton
 from .graphics import fz_box_pattern, fz_logo_4lines
+from .table import Table, TableColumn
 
 
 class MainWindow(PopUpLauncher):
@@ -32,7 +36,7 @@ class MainWindow(PopUpLauncher):
         self.trackers = dict()
 
         self.logo = FuzzerLogo(max_load=controller.capacity)
-        self.issues_table = IssuesTable(issues_baseline=[issue['_id'] for issue in self.db.all_issues()], db=self.db, initial_sort='id')
+        self.issues_table = IssuesTable(issues_baseline=[issue['_id'] for issue in self.db.all_issues()], db=self.db, initial_sort='sut')
         self.stat_table = StatTable(['fuzzer'], stat_baseline=self.db.stat_snapshot([config_get_name_from_section(fuzz_section) for fuzz_section in controller.fuzzers]), db=self.db)
         self.job_table = JobsTable()
 
@@ -48,8 +52,8 @@ class MainWindow(PopUpLauncher):
         ], dividechars=0)
 
         self.footer_btns = OrderedDict()
-        self.footer_btns['help'] = FormattedButton('F1')
-        self.footer_btns['menu'] = FormattedButton('F2')
+        self.footer_btns['about'] = AboutButton('F1 About')
+        self.footer_btns['validate'] = FormattedButton('F2 Validate', on_press=lambda btn: self.validate())
         self.footer_btns['view'] = ViewButton('F3 View', self.issues_table, self.config, self.trackers)
         self.footer_btns['edit'] = EditButton('F4 Edit', self.issues_table)
         self.footer_btns['copy'] = FormattedButton('F5 Copy', on_press=lambda btn: self.copy_selected())
@@ -60,64 +64,109 @@ class MainWindow(PopUpLauncher):
         self.footer_btns['quit'] = FormattedButton('F10 Quit', on_press=lambda btn: self._emit('close'))
 
         self.view = AttrMap(Frame(body=Pile([('fixed', 6, self.logo), self.content_columns]),
-                                  footer=BoxAdapter(Filler(AttrMap(Columns(list(self.footer_btns.values()), dividechars=1), 'footer_button_bg')), height=1)),
-                            'main_bg')
+                                  footer=BoxAdapter(Filler(AttrMap(Columns(list(self.footer_btns.values()), dividechars=1), 'default')), height=1)),
+                            'border')
         super(MainWindow, self).__init__(self.view)
 
-        connect_signal(self, 'warning', lambda _, msg: self.create_warning(msg))
-        connect_signal(self.issues_table, 'select', lambda source, selection: self.formatted_issue_popup(selection[1]))
+        connect_signal(self, 'warning', lambda _, msg: self.warning_popup(msg))
+        connect_signal(self.issues_table, 'select', lambda source, selection: self.footer_btns['view'].keypress((0, 0), 'enter'))
         connect_signal(self.issues_table, 'refresh', lambda source: self._emit('refresh'))
         connect_signal(self.stat_table, 'refresh', lambda source: self._emit('refresh'))
 
-    def create_warning(self, msg):
+    def init_popup(self, msg):
         width = max([len(line) for line in msg.splitlines()] + [20])
         height = msg.count('\n') + 4
         cols, rows = os.get_terminal_size()
-
         self.get_pop_up_parameters = lambda: dict(left=max(cols // 2 - width // 2, 1),
                                                   top=max(rows // 2 - height // 2, 1),
                                                   overlay_width=width,
                                                   overlay_height=height)
-        self.warning_msg = msg
-        self.open_pop_up()
+        return self.open_pop_up()
+
+    def warning_popup(self, msg):
+        self.pop_up = WarningDialog(msg)
+        connect_signal(self.pop_up, 'close', lambda button: self.close_pop_up())
+        self.init_popup(msg)
+
+    def remove_issue_popup(self, msg, ident):
+        self.pop_up = YesNoDialog(msg)
+        connect_signal(self.pop_up, 'yes', lambda button: self.remove_issue(ident))
+        connect_signal(self.pop_up, 'no', lambda button: self.close_pop_up())
+        self.init_popup(msg)
+
+    def remove_issue(self, ident):
+        self.db.remove_issue_by_id(ident)
+        del self.issues_table[self.issues_table.focus_position]
+        self.close_pop_up()
 
     def create_pop_up(self):
-        pop_up = WarningDialog(self.warning_msg)
-        connect_signal(pop_up, 'close', lambda button: self.close_pop_up())
-        return pop_up
+        return self.pop_up
 
     def add_reduce_job(self):
         if self.issues_table.selection:
             issue = self.issues_table.selection.data
             self.controller.add_reduce_job(issue=self.db.find_issue_by_id(issue['_id']))
 
-    def copy_selected(self):
-        # FIXME: why not:
-        # issue = self.issues_table.selection.data
-        # sut = issue['sut']
+    def validate(self):
         if self.issues_table.selection:
-            sut = self.issues_table.listbox.focus.data['sut']
-            sut_section = 'sut.' + sut
-            if sut not in self.trackers:
-                self.trackers[sut] = init_tracker(self.config, sut_section, self.db)
-            pyperclip.copy(self.trackers[sut].format_issue(self.db.find_issue_by_id(self.issues_table.selection.data['_id'])))
+            sut_section = 'sut.' + self.issues_table.selection.data['sut']
+            if not self.config.has_section(sut_section):
+                self.warning_popup('{section}: no such section in the config.'.format(section=sut_section))
+                return
+
+            job = ValidateJob(config=self.config, db=self.db, listener=self.controller.listener, sut_section=sut_section,
+                              fuzzer_name=self.issues_table.selection.data['fuzzer'],
+                              test=self.issues_table.selection.data['test'])
+            issues = job.run()
+            expected_id = self.issues_table.selection.data['id']
+
+            if issues:
+                assert len(issues) == 1, 'The length of issues must be 1.'
+                issue = issues[0]
+                # Remove the database identifier from the issue object since it'd conflict when updating.
+                del issue['_id']
+                if issue['id'] == expected_id:
+                    msg = '{id} is still valid.'.format(id=expected_id.decode('utf-8', errors='ignore'))
+                    self.db.update_issue(issue=self.issues_table.selection.data, _set=issue)
+                    self.warning_popup(msg)
+                    return
+            self.remove_issue_popup(msg='The original issue is not valid anymore. Would you like to delete it?', ident=self.issues_table.selection.data['_id'])
+
+    def copy_selected(self, test_bytes=False):
+        if self.issues_table.selection:
+            issue = self.db.find_issue_by_id(self.issues_table.selection.data['_id'])
+            if test_bytes:
+                pyperclip.copy(str(issue['test']))
+            else:
+                sut = self.issues_table.selection.data['sut']
+                sut_section = 'sut.' + sut
+                if sut not in self.trackers:
+                    self.trackers[sut] = init_tracker(self.config, sut_section)
+                pyperclip.copy(self.trackers[sut].format_issue(issue))
 
     def keypress(self, size, key):
         if key == 'tab':
-            if self.content_columns.focus_position == 0:
-                self.content_columns.focus_position = 1
-            else:
-                self.content_columns.focus_position = 0
+            if self.content_columns.focus_col == 0:
+                self.content_columns.focus_col = 1
+                self.data_tables.focus_item = 0
+            elif self.content_columns.focus_col == 1:
+                if self.data_tables.focus_position == 0:
+                    self.data_tables.focus_position = 1
+                else:
+                    self.content_columns.focus_col = 0
         elif key == 'f1':
-            self.footer_btns['help'].keypress((0, 0), 'enter')
+            self.footer_btns['about'].keypress((0, 0), 'enter')
         elif key == 'f2':
-            self.footer_btns['menu'].keypress((0, 0), 'enter')
+            self.footer_btns['validate'].keypress((0, 0), 'enter')
         elif key == 'f3':
             self.footer_btns['view'].keypress((0, 0), 'enter')
         elif key == 'f4':
             self.footer_btns['edit'].keypress((0, 0), 'enter')
         elif key == 'f5':
             self.footer_btns['copy'].keypress((0, 0), 'enter')
+        # Copy the test content as bytes to the clipboard.
+        elif key == 'shift f5':
+            self.copy_selected(test_bytes=True)
         elif key == 'f6':
             self.footer_btns['reduce'].keypress((0, 0), 'enter')
         elif key == 'f7':
@@ -134,14 +183,10 @@ class MainWindow(PopUpLauncher):
     def show_all(self, btn):
         if btn.label == 'F9 Show all':
             btn.set_label('F9 Show less')
-            self.issues_table.all_issues = True
-            self.stat_table.show_current = False
             self.issues_table.show_all()
             self.stat_table.show_all()
         else:
             btn.set_label('F9 Show all')
-            self.issues_table.all_issues = False
-            self.stat_table.show_current = True
             self.issues_table.show_less()
             self.stat_table.show_less()
 
@@ -175,10 +220,7 @@ class IssuesTable(Table):
                 self.db.remove_issue_by_id(self[self.focus_position].data['_id'])
                 del self[self.focus_position]
         elif key in ["r", "ctrl r"]:
-            if self.all_issues:
-                self.show_all()
-            else:
-                self.show_less()
+            self._emit('refresh')
         else:
             return super(IssuesTable, self).keypress(size, key)
 
@@ -197,23 +239,37 @@ class IssuesTable(Table):
             self.show_less()
 
     def show_all(self):
+        self.all_issues = True
         self.query_data = self.format_names(self.db.all_issues())
         self.requery(self.query_data)
         self.walker._modified()
 
     def show_less(self):
+        self.all_issues = False
         current_issues = [issue for issue in self.db.all_issues() if issue['_id'] not in self.issues_baseline]
         self.query_data = self.format_names(current_issues)
         self.requery(self.query_data)
         self.walker._modified()
 
+    def update_row(self, ident):
+        issue = self.db.find_issue_by_id(ident)
+        attr_map, focus_map = self.get_attr(issue)
+        super(IssuesTable, self).update_row_style(ident, attr_map, focus_map)
+
+    def get_attr(self, data):
+        if data['reported']:
+            attr_map = {None: 'issue_reported'}
+            focus_map = {None: 'issue_reported_selected'}
+        elif data['reduced']:
+            attr_map = {None: 'issue_reduced'}
+            focus_map = {None: 'issue_reduced_selected'}
+        else:
+            attr_map = {None: 'default'}
+            focus_map = {None: 'selected'}
+        return attr_map, focus_map
+
     def add_row(self, data, position=None, attr_map=None, focus_map=None):
-        if 'reported' in data and data['reported']:
-            attr_map = {None: 'table_row_reported'}
-            focus_map = {None: 'table_row_reported focused'}
-        elif 'reduced' in data and data['reduced']:
-            attr_map = {None: 'table_row_reduced'}
-            focus_map = {None: 'table_row_reduced focused'}
+        attr_map, focus_map = self.get_attr(data)
         return super(IssuesTable, self).add_row(data, position=0, attr_map=attr_map, focus_map=focus_map)
 
 
@@ -243,11 +299,13 @@ class StatTable(Table):
             self.show_all()
 
     def show_all(self):
+        self.show_current = False
         self.query_data = list(self.db.stat_snapshot(None).values())
         self.requery(self.query_data)
         self.walker._modified()
 
     def show_less(self):
+        self.show_current = True
         snapshot = self.db.stat_snapshot([fuzzer for fuzzer in self.stat_baseline])
         current_progress = dict((fuzzer, dict(fuzzer=fuzzer,
                                               exec=snapshot[fuzzer]['exec'] - self.stat_baseline[fuzzer]['exec'],
@@ -259,6 +317,8 @@ class StatTable(Table):
 
 
 class JobsTable(WidgetWrap):
+    signals = ['click']
+
     _selectable = False
 
     def __init__(self):
@@ -271,11 +331,11 @@ class JobsTable(WidgetWrap):
 
     @property
     def title(self):
-        return ['[', ('yellow', ' {txt} '.format(txt=self.title_text)), ']']
+        return ['[', ('border_title', ' {txt} '.format(txt=self.title_text)), ']']
 
     @title.setter
     def title(self, value):
-        self.pattern_box.set_title(['[', ('yellow', ' JOBS ({cnt}) '.format(cnt=value)), ']'])
+        self.pattern_box.set_title(['[', ('border_title', ' JOBS ({cnt}) '.format(cnt=value)), ']'])
 
     @property
     def active_jobs(self):
@@ -323,6 +383,11 @@ class JobsTable(WidgetWrap):
             if self.listbox.focus_position > 0:
                 self.listbox.focus_position -= 1
 
+    # Override the mouse_event method (param list is fixed).
+    def mouse_event(self, size, event, button, col, row, focus):
+        if event == 'mouse press':
+            emit_signal(self, 'click')
+
 
 class JobWidget(WidgetWrap):
 
@@ -330,45 +395,34 @@ class JobWidget(WidgetWrap):
     _selectable = True
 
     inactive_map = {
-        None: 'inactive_job',
-        'progress_normal': 'inactive_job_progress_normal',
-        'prop_name': 'inactive_job_prop',
-        'prop_value': 'inactive_job_prop_value',
-        'title_txt': 'inactive_job_title',
-        'title_bg': 'inactive_job_title_bg'
+        None: 'default',
+        'prop_name': 'job_inactive',
+        'prop_value': 'job_inactive',
+        'header': 'job_head_inactive',
+        'progress_normal': 'job_progress_inactive'
     }
 
-    inactive_focus_map = {
-        None: 'inactive_job focused',
-        'progress_normal': 'inactive_job_progress_normal focused',
-        'progress_done': 'inactive_job_progress_done focused',
-        'prop_name': 'inactive_job_prop focused',
-        'prop_value': 'inactive_job_prop_value focused',
-        'title_txt': 'inactive_job_title',
-        'title_bg': 'inactive_job_title_bg'
-    }
+    inactive_focus_map = dict(inactive_map)
+    inactive_focus_map.update({
+        None: 'selected',
+        'prop_name': 'job_inactive_selected',
+        'prop_value': 'job_inactive_selected'
+    })
 
     active_map = {
-        None: 'active_job',
-        'progress_normal': 'active_job_progress_normal',
-        'progress_done': 'active_job_progress_done',
-        'progress_smooth': 'active_job_progress_smooth',
-        'prop_name': 'active_job_prop',
-        'prop_value': 'active_job_prop_value',
-        'title_txt': 'active_job_title',
-        'title_bg': 'active_job_title_bg'
+        None: 'default',
+        'prop_name': 'job_label',
+        'prop_value': 'default',
+        'header': 'job_head',
+        'progress_normal': 'job_progress',
+        'progress_done': 'job_progress_complete',
     }
-
-    active_focus_map = {
-        None: 'active_job focused',
-        'progress_normal': 'active_job_progress_normal focused',
-        'progress_done': 'active_job_progress_done focused',
-        'progress_smooth': 'active_job_progress_smooth focused',
-        'prop_name': 'active_job_prop focused',
-        'prop_value': 'active_job_prop_value focused',
-        'title_txt': 'active_job_title focused',
-        'title_bg': 'active_job_title_bg focused'
-    }
+    active_focus_map = dict(active_map)
+    active_focus_map.update({
+        None: 'selected',
+        'prop_name': 'job_label_selected',
+        'prop_value': 'selected'
+    })
 
     def __init__(self, data, pb_done=None):
         self.values = dict()
@@ -381,18 +435,18 @@ class JobWidget(WidgetWrap):
                 value = data[x]
             self.values[x] = Text(('prop_value', value))
 
-        list_ui = [Columns([('weight', 3, Text(('prop_name', self.labels[x]))),
-                            ('weight', 7, self.values[x])]) for x in data if x in self.labels]
+        body_content = [AttrMap(Text(('header', self.title), align='center'), attr_map='header')]
+        body_content.extend((Columns([('weight', 2, Text(('prop_name', self.labels[x]))),
+                                      ('weight', 8, self.values[x])]) for x in data if x in self.labels))
 
         self.max_progress = None
         if pb_done is not None:
             self.max_progress = pb_done
-            self.progress = ProgressBar('progress_normal', 'progress_done', current=0, done=self.max_progress, satt='progress_smooth')
-            list_ui.append(Columns([('weight', 3, Text(('prop_name', 'Progress'))),
-                                    ('weight', 7, self.progress)]))
+            self.progress = ProgressBar('progress_normal', 'progress_done', current=0, done=self.max_progress)
+            body_content.append(Columns([('weight', 2, Text(('prop_name', 'Progress'))),
+                                         ('weight', 8, self.progress)]))
 
-        body = Pile([AttrMap(Text(('title_txt', self.title), align='center'), attr_map='title_bg'), *list_ui])
-        self.attr = AttrMap(body, attr_map=self.inactive_map, focus_map=self.inactive_focus_map)
+        self.attr = AttrMap(Pile(body_content), attr_map=self.inactive_map, focus_map=self.inactive_focus_map)
         super(JobWidget, self).__init__(self.attr)
 
     def update_progress(self, done):
@@ -436,17 +490,21 @@ class UpdateJobWidget(JobWidget):
 class FuzzerLogo(WidgetWrap):
 
     def __init__(self, max_load=100):
-        self.timer = TimerWidget('Uptime')
-        self.load = ProgressBar('progress_normal', 'progress_complete', current=0, done=max_load)
+        self.timer = TimerWidget()
+        self.load = ProgressBar('load_progress', 'load_progress_complete', current=0, done=max_load)
         self.text = Text(fz_logo_4lines(), align='center')
         rows = Pile([('pack', self.text),
-                     Columns([Filler(self.timer),
-                              Filler(Text(('timer_label', 'Load: '), align='right')), Filler(self.load)], dividechars=1)])
+                     Columns([(20, Columns([Filler(Text(('label', 'Uptime: '), align='left')),
+                                            Filler(self.timer)])),
+                              ('weight', 1, Filler(Text(''))),
+                              ('weight', 1, Columns([Filler(Text(('label', 'Load: '), align='right')),
+                                            Filler(self.load)]))
+                              ], dividechars=1)])
         self.do_animate = False
         super(FuzzerLogo, self).__init__(rows)
 
     def random_color(self):
-        return random.choice(['red', 'yellow', 'green', 'blue'])
+        return random.choice(['logo_fireworks_1', 'logo_fireworks_2', 'logo_fireworks_3', 'logo_fireworks_4'])
 
     def update_colors(self):
         text = []
@@ -466,16 +524,13 @@ class FuzzerLogo(WidgetWrap):
         self.do_animate = False
 
     def reset(self):
-        self.text.set_text(('green', fz_logo_4lines()))
+        self.text.set_text(fz_logo_4lines())
 
 
 class TimerWidget(Text):
 
-    def __init__(self, label, no_ds=False):
-        self.label = label
+    def __init__(self):
         self._started = time.time()
-        self.no_ds = no_ds
-        self.fmt = '%s: %02d:%02d:%02d' if self.no_ds else '%s: %02d:%02d:%04.1f'
         super(TimerWidget, self).__init__(self.format_text(0))
         self.update()
 
@@ -488,8 +543,8 @@ class TimerWidget(Text):
         return hh, mm, ss
 
     def format_text(self, ss):
-        return self.fmt % (self.label, *self.to_hms(ss))
+        return '%02d:%02d:%04.1f' % self.to_hms(ss)
 
     def update(self):
-        self.set_text(('timer_value', self.format_text(time.time() - self._started)))
+        self.set_text(('time', self.format_text(time.time() - self._started)))
         return True

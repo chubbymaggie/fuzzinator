@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -10,8 +10,9 @@ import os
 
 class ListDirectory(object):
     """
-    A simple fuzzer to iterate through the files in a directory and return their
-    contents one by one. Useful for re-testing previously discovered issues.
+    A simple test generator to iterate through existing files in a directory and
+    return their contents one by one. Useful for re-testing previously
+    discovered issues.
 
     Since the fuzzer starts iterating from the beginning of the directory in
     every fuzz job, there is no gain in running multiple instances of this
@@ -19,26 +20,40 @@ class ListDirectory(object):
     running in the same fuzz job batch until all the files of the directory are
     processed.
 
-    Mandatory parameter of the fuzzer:
-      - 'outdir': path to the directory containing the files that act as test
+    **Mandatory parameter of the fuzzer:**
+
+      - ``outdir``: path to the directory containing the files that act as test
         inputs.
 
-    Example configuration snippet:
-    [sut.foo]
-    # see fuzzinator.call.*
+    **Optional parameter of the fuzzer:**
 
-    [fuzz.foo-with-oldbugs]
-    sut=sut.foo
-    fuzzer=fuzzinator.fuzzer.ListDirectory
-    instances=1
-    batch=inf
+      - ``subdirs``: descend recursively into all subdirectories of ``outdir``
+        (boolean value, False by default).
 
-    [fuzz.foo-with-oldbugs.fuzzer.init]
-    outdir=/home/alice/foo-old-bugs/
+    **Example configuration snippet:**
+
+        .. code-block:: ini
+
+            [sut.foo]
+            # see fuzzinator.call.*
+
+            [fuzz.foo-with-oldbugs]
+            sut=sut.foo
+            fuzzer=fuzzinator.fuzzer.ListDirectory
+            instances=1
+            batch=inf
+
+            [fuzz.foo-with-oldbugs.fuzzer.init]
+            outdir=/home/alice/foo-old-bugs/
     """
 
-    def __init__(self, outdir, **kwargs):
-        self.tests = [os.path.join(outdir, test) for test in os.listdir(outdir)]
+    def __init__(self, outdir, subdirs='False', **kwargs):
+        subdirs = subdirs in [1, '1', True, 'True', 'true']
+        self.tests = []
+        for dirpath, dirnames, filenames in os.walk(outdir):
+            if not subdirs:
+                dirnames[:] = []
+            self.tests.extend([os.path.join(dirpath, test) for test in filenames])
         self.tests.sort(reverse=True)
 
     def __enter__(self):

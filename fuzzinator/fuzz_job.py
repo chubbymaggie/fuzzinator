@@ -1,7 +1,7 @@
-# Copyright (c) 2016 Renata Hodovan, Akos Kiss.
+# Copyright (c) 2016-2017 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -46,7 +46,7 @@ class FuzzJob(CallJob):
                 with sut_call:
                     while index < self.batch:
                         test = fuzzer(index=index, **fuzzer_kwargs)
-                        if not test:
+                        if test is None:
                             self.batch = index
                             break
 
@@ -65,7 +65,7 @@ class FuzzJob(CallJob):
                             # Check if fuzzer has its own test.
                             if hasattr(fuzzer, 'test'):
                                 test = fuzzer.test
-                                if not test:
+                                if test is None:
                                     self.batch = index
                                     self.listener.warning(msg='{sut} crashed before the first test.'.format(sut=config_get_name_from_section(self.sut_section)))
                                     break

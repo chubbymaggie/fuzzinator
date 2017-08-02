@@ -1,7 +1,7 @@
 # Copyright (c) 2016 Renata Hodovan, Akos Kiss.
 #
 # Licensed under the BSD 3-Clause License
-# <LICENSE.md or https://opensource.org/licenses/BSD-3-Clause>.
+# <LICENSE.rst or https://opensource.org/licenses/BSD-3-Clause>.
 # This file may not be copied, modified, or distributed except
 # according to those terms.
 
@@ -18,16 +18,17 @@ def fz_logo_4lines():
     padding = ''.join([' '] * (len(__version__) + 2)) + '\n'
     if util.get_encoding_mode() == 'utf8':
         return [
-            ('green', u' ▄▄▄▄ ▄▄ ▄▄ ▄▄▄▄▄ ▄▄▄▄▄ ▄▄ ▄▄▄▄   ▄▄▄  █▄     ▄▄▄  ▄▄▄▄  '), ('yellow', u'[{version}]\n'.format(version=__version__)),
-            ('green', u'██ ▀▀ ██ ██   ▄█▀   ▄█▀ ▄▄ ██ ██ ▀▀ ██ ██▀   ██ ██ ██ ██ '), ('yellow', padding),
-            ('green', u'██▀   ██ ██ ▄█▀   ▄█▀   ██ ██ ██ ▄█▀██ ██ ██ ██ ██ ██▀█▄ '), ('yellow', padding),
-            ('green', u'█▀     ▀▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀▀ ▀▀ ▀▀ ▀▀▀▀▀  ▀▀▀▀  ▀▀▀  ▀▀ ▀█ '), ('yellow', padding),
-            ('motto', u'In Bug We Trust.')]
+            ('logo', u' ▄▄▄▄ ▄▄ ▄▄ ▄▄▄▄▄ ▄▄▄▄▄ ▄▄ ▄▄▄▄   ▄▄▄  █▄     ▄▄▄  ▄▄▄▄  '), ('logo_secondary', u'[{version}]\n'.format(version=__version__)),
+            ('logo', u'██ ▀▀ ██ ██   ▄█▀   ▄█▀ ▄▄ ██ ██ ▀▀ ██ ██▀   ██ ██ ██ ██ '), ('logo_secondary', padding),
+            ('logo', u'██▀   ██ ██ ▄█▀   ▄█▀   ██ ██ ██ ▄█▀██ ██ ██ ██ ██ ██▀█▄ '), ('logo_secondary', padding),
+            ('logo', u'█▀     ▀▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀▀ ▀▀ ▀▀ ▀▀▀▀▀  ▀▀▀▀  ▀▀▀  ▀▀ ▀█ '), ('logo_secondary', padding),
+            ('logo_secondary', u'In Bug We Trust.')]
     return [
-        u' #### ## ## ##### ##### ## ####  ####  ##     ###  ####  ', ('yellow', '[{version}]\n'.format(version=__version__)),
-        u'##    ## ##   ###   ###    ## ##   ### ###   ## ## ## ## ', ('yellow', padding),
-        u'###   ## ## ###   ###   ## ## ## ## ## ##    ## ## ####  ', ('yellow', padding),
-        u'##     ###  ##### ##### ## ## ## #####  ####  ###  ## ## ', ('yellow', padding)]
+        ('logo', u' #### ## ## ##### ##### ## ####  ####  ##     ###  ####  '), ('logo_secondary', '[{version}]\n'.format(version=__version__)),
+        ('logo', u'##    ## ##   ###   ###    ## ##   ### ###   ## ## ## ## '), ('logo_secondary', padding),
+        ('logo', u'###   ## ## ###   ###   ## ## ## ## ## ##    ## ## ####  '), ('logo_secondary', padding),
+        ('logo', u'##     ###  ##### ##### ## ## ## #####  ####  ###  ## ## '), ('logo_secondary', padding),
+        ('logo_secondary', u'In Bug We Trust.')]
 
 
 def fz_box_pattern():
